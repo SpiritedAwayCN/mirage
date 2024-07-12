@@ -254,12 +254,21 @@ __global__ void graphdef_kernel_1(
   }
 }
 
-void mugraph_executor(char *gpu_base_ptr) {
+void mugraph_executor(
+  size_t buffer_size, // TODO: vary by device?
+  char *input_1, char *input_2, char *input_3,
+  char *output_1
+) {
+  char *gpu_base_ptr;
+
+  CHECK_CUDA(cudaSetDevice(0));
+  CHECK_CUDA(cudaMalloc(&gpu_base_ptr, buffer_size)); // TODO
+
   // launching kernel: graphdef_kernel_0
   {
-    cutlass::half_t *dtensor10000008 = (cutlass::half_t*)(gpu_base_ptr + 0);
-    cutlass::half_t *dtensor10000009 = (cutlass::half_t*)(gpu_base_ptr + 65536);
-    cutlass::half_t *dtensor10000010 = (cutlass::half_t*)(gpu_base_ptr + 1114112);
+    cutlass::half_t *dtensor10000008 = (cutlass::half_t*)input_1;
+    cutlass::half_t *dtensor10000009 = (cutlass::half_t*)input_2;
+    cutlass::half_t *dtensor10000010 = (cutlass::half_t*)input_3;
     cutlass::half_t *dtensor10000011 = (cutlass::half_t*)(gpu_base_ptr + 2162688);
     cutlass::half_t *dtensor10000012 = (cutlass::half_t*)(gpu_base_ptr + 3211264);
     dim3 grid_dim = {2, 16, 4};
@@ -273,7 +282,7 @@ void mugraph_executor(char *gpu_base_ptr) {
   {
     cutlass::half_t *dtensor10000011 = (cutlass::half_t*)(gpu_base_ptr + 2162688);
     cutlass::half_t *dtensor10000012 = (cutlass::half_t*)(gpu_base_ptr + 3211264);
-    cutlass::half_t *dtensor10000013 = (cutlass::half_t*)(gpu_base_ptr + 3227648);
+    cutlass::half_t *dtensor10000013 = (cutlass::half_t*)output_1;
     dim3 grid_dim = {2, 16, 1};
     dim3 block_dim = {128, 1, 1};
     graphdef_kernel_1<<<grid_dim, block_dim, 72736>>>(
@@ -283,26 +292,60 @@ void mugraph_executor(char *gpu_base_ptr) {
   }
 } // end of mugraph_executer
 
-int main() {
-  char *gpu_base_ptrs[16];
-  for (int i = 0; i < 1; i++) {
-    CHECK_CUDA(cudaSetDevice(i));
-    CHECK_CUDA(cudaMalloc(&gpu_base_ptrs[i], 2147483648));
+static PyObject *launch(PyObject *self, PyObject *args) {
+  size_t buffer_size;
+  char *input_1, *input_2, *input_3, *output_1;
+  if (!PyArg_ParseTuple(args, "IPPPP", &buffer_size, &input_1, &input_2, &input_3, &output_1)) {
+    return NULL;
   }
-  CHECK_CUDA(cudaDeviceSynchronize());
-  cudaEvent_t events[2];
-  CHECK_CUDA(cudaEventCreate(&events[0]));
-  CHECK_CUDA(cudaEventCreate(&events[1]));
-  for (int i = 0; i < 1024; i++) {
-    mugraph_executor(gpu_base_ptrs[0]);
-  }
-  CHECK_CUDA(cudaEventRecord(events[0]));
-  for (int i = 0; i < 1024; i++) {
-    mugraph_executor(gpu_base_ptrs[0]);
-  }
-  CHECK_CUDA(cudaEventRecord(events[1]));
-  CHECK_CUDA(cudaEventSynchronize(events[1]));
-  float runtime_ms;
-  cudaEventElapsedTime(&runtime_ms, events[0], events[1]);
-  printf("Mugraph runtime = %.8lfms\n", runtime_ms / 1024);
+  mugraph_executor(buffer_size, input_1, input_2, input_3, output_1);
+  Py_RETURN_NONE;
 }
+
+static PyMethodDef ModuleMethods[] = {
+  {"launch", launch, METH_VARARGS, "Entry point for all kernels with this signature"},
+  {NULL, NULL, 0, NULL} // sentinel
+};
+
+static struct PyModuleDef ModuleDef = {
+  PyModuleDef_HEAD_INIT,
+  "__mirage_launcher",
+  NULL, //documentation
+  -1, //size
+  ModuleMethods
+};
+
+PyMODINIT_FUNC PyInit___mirage_launcher(void) {
+  PyObject *m = PyModule_Create(&ModuleDef);
+  if(m == NULL) {
+    return NULL;
+  }
+  PyModule_AddFunctions(m, ModuleMethods);
+  return m;
+}
+
+
+
+// int main() {
+//   char *gpu_base_ptrs[16];
+//   for (int i = 0; i < 1; i++) {
+//     CHECK_CUDA(cudaSetDevice(i));
+//     CHECK_CUDA(cudaMalloc(&gpu_base_ptrs[i], 2147483648));
+//   }
+//   CHECK_CUDA(cudaDeviceSynchronize());
+//   cudaEvent_t events[2];
+//   CHECK_CUDA(cudaEventCreate(&events[0]));
+//   CHECK_CUDA(cudaEventCreate(&events[1]));
+//   for (int i = 0; i < 1024; i++) {
+//     mugraph_executor(gpu_base_ptrs[0]);
+//   }
+//   CHECK_CUDA(cudaEventRecord(events[0]));
+//   for (int i = 0; i < 1024; i++) {
+//     mugraph_executor(gpu_base_ptrs[0]);
+//   }
+//   CHECK_CUDA(cudaEventRecord(events[1]));
+//   CHECK_CUDA(cudaEventSynchronize(events[1]));
+//   float runtime_ms;
+//   cudaEventElapsedTime(&runtime_ms, events[0], events[1]);
+//   printf("Mugraph runtime = %.8lfms\n", runtime_ms / 1024);
+// }
